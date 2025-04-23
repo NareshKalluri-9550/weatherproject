@@ -34,29 +34,8 @@ WEATHER API PROJECT SETUP
 
 ## API Endpoints
 curl -X POST http://localhost:5000/temperature -H "Content-Type: application/json" -d "{\"parameter\":\"temperature\",\"units\":\"fahrenheit\"}"
-{
-  "measured_value": 93.92,
-  "original_units": "celsius",
-  "original_value": 34.4,
-  "parameter": "temperature",
-  "units": "fahrenheit"
-}
 
 curl -X POST http://localhost:5000/pressure -H "Content-Type: application/json" -d "{\"parameter\":\"pressure\",\"units\":\"hpa\"}"
-{
-  "measured_value": 1014.0,
-  "original_units": "hpa",
-  "original_value": 1014.0,
-  "parameter": "pressure",
-  "units": "hpa"
-}
 
 curl -X POST http://localhost:5000/pollutant -H "Content-Type: application/json" -d "{\"parameter\":\"pollutant\",\"units\":\"ppm\"}"
-{
-  "city": "Hyderabad",
-  "measured_value": 0.0561,
-  "original_units": "\u00b5g/m\u00b3",
-  "original_value": 56.055,
-  "parameter": "pollutant",
-  "units": "ppm"
-}
+
