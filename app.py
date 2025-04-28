@@ -5,198 +5,126 @@ import requests
 from enum import Enum
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
-
-# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 
-# Configuration for third-party APIs
-THIRD_PARTY_APIS = {
-    'temperature': {
-        'url': 'https://api.weatherapi.com/v1/current.json',
-        'default_unit': 'celsius',
-        'param_name': 'temp',
-        'api_key': os.getenv('API_KEY')  # Load API key from .env
-    },
-    'pressure': {
-        'url': 'https://api.weatherapi.com/v1/current.json',
-        'default_unit': 'hpa',
-        'param_name': 'pressure',
-        'api_key': os.getenv('API_KEY')  # Load API key from .env
-    },
-    'pollutant': {
-        'url': 'https://api.weatherapi.com/v1/current.json',
-        'default_unit': 'ppm',
-        'param_name': 'aqi',
-        'api_key': os.getenv('API_KEY')  # Load API key from .env
-    }
-}
+API_KEY = os.getenv('API_KEY')
+API_URL = 'https://api.weatherapi.com/v1/current.json'
 
 class ValidUnits(Enum):
     TEMPERATURE = ['celsius', 'fahrenheit']
     PRESSURE = ['hpa', 'atm', 'mmhg']
     POLLUTANT = ['ppm', 'ppb', 'µg/m³']
 
+PARAMS_CONFIG = {
+    'temperature': {
+        'default_unit': 'celsius',
+        'extract': lambda d: d['current']['temp_c']
+    },
+    'pressure': {
+        'default_unit': 'hpa',
+        'extract': lambda d: d['current']['pressure_mb']
+    },
+    'pollutant': {
+        'default_unit': 'µg/m³',
+        'extract': lambda d: d['current']['air_quality']['pm2_5'],
+        'extra': {'aqi': 'yes'}
+    }
+}
+
 def convert_units(value, from_unit, to_unit, parameter):
-    if parameter == 'temperature':
-        if from_unit == 'celsius' and to_unit == 'fahrenheit':
-            return round((value * 9/5) + 32, 2)
-        elif from_unit == 'fahrenheit' and to_unit == 'celsius':
-            return round((value - 32) * 5/9, 2)
-        return value
+    # Ensure that the value is numeric (either int or float)
+    if not isinstance(value, (int, float)):
+        raise TypeError(f"Invalid value type for {parameter}. Expected a number, got {type(value)}.")
     
-    elif parameter == 'pressure':
-        if from_unit == 'hpa' and to_unit == 'atm':
-            return round(value / 1013.25, 4)
-        elif from_unit == 'hpa' and to_unit == 'mmhg':
-            return round(value * 0.750062, 2)
-        return value
+    conversions = {
+        'temperature': {
+            ('celsius', 'fahrenheit'): lambda v: round((v * 9/5) + 32, 2),
+            ('fahrenheit', 'celsius'): lambda v: round((v - 32) * 5/9, 2)
+        },
+        'pressure': {
+            ('hpa', 'atm'): lambda v: round(v / 1013.25, 4),
+            ('hpa', 'mmhg'): lambda v: round(v * 0.750062, 2)
+        },
+        'pollutant': {
+            ('µg/m³', 'ppm'): lambda v: round(v / 1000, 4)
+        }
+    }
     
-    elif parameter == 'pollutant':
-        if from_unit == 'µg/m³' and to_unit == 'ppm':
-            return round(value / 1000, 4) 
-        return value
+    try:
+        return conversions.get(parameter, {}).get((from_unit, to_unit), lambda v: v)(value)
+    except Exception as e:
+        raise ValueError(f"Conversion failed for {parameter}: {str(e)}")
 
 def validate_units(parameter, units):
-    valid_units = ValidUnits.__dict__[parameter.upper()].value
-    if units.lower() not in valid_units:
-        raise ValueError(f"Invalid units for {parameter}. Must be one of: {valid_units}")
+    # Ensure the parameter is a string and units is a valid unit
+    if not isinstance(parameter, str):
+        raise ValueError(f"Invalid parameter type. Expected a string, got {type(parameter)}.")
+    if not isinstance(units, str):
+        raise ValueError(f"Invalid units type. Expected a string, got {type(units)}.")
+    if units.lower() not in ValidUnits[parameter.upper()].value:
+        raise ValueError(f"Invalid units for {parameter}. Must be one of: {ValidUnits[parameter.upper()].value}")
 
-@app.route('/temperature', methods=['POST'])
-def get_temperature():
+def fetch_weather_data(city, extra=None):
+    params = {'key': API_KEY, 'q': city}
+    if extra:
+        params.update(extra)
+    response = requests.get(API_URL, params=params)
+    response.raise_for_status()
+    return response.json()
+
+def handle_request(parameter):
     try:
+        # Check if request is JSON
+        if not request.is_json:
+            return jsonify({'error': 'Content-type must be application/json'}), 415
+
         data = request.get_json()
-        if not data or 'units' not in data or 'parameter' not in data:
-            return jsonify({'error': 'Missing required parameter: units or parameter'}), 400
+        if not data:
+            return jsonify({'error': 'Malformed JSON'}), 400
+
+        # Ensure units is a valid string
+        units = str(data.get('units', '')).lower()
+        if not units:
+            return jsonify({'error': 'Invalid units'}), 400
         
-        parameter = data['parameter'].lower()
-        units = data['units'].lower()
+        logging.debug(f"Received request for {parameter} with city: {data.get('city', 'Hyderabad')} and units: {units}")
+        
         validate_units(parameter, units)
-        
-        config = THIRD_PARTY_APIS['temperature']
-        city_name = data.get('city', 'Hyderabad')
-        response = requests.get(
-            config['url'],
-            params={'key': config['api_key'], 'q': city_name}
-        )
-        response.raise_for_status()
-        
-        original_value = response.json()['current']['temp_c']
-        converted_value = convert_units(original_value, config['default_unit'], units, 'temperature')
-        
+        config = PARAMS_CONFIG[parameter]
+        json_data = fetch_weather_data(data.get('city', 'Hyderabad'), config.get('extra'))
+
+        original_value = config['extract'](json_data)
+        converted_value = convert_units(original_value, config['default_unit'], units, parameter)
+
         return jsonify({
-            'parameter': 'temperature',
+            'parameter': parameter,
             'measured_value': converted_value,
             'units': units,
             'original_value': original_value,
-            'original_units': config['default_unit']
+            'original_units': config['default_unit'],
+            'city': data.get('city', 'Hyderabad')
         })
-        
-    except ValueError as e:
-        logging.error(f"ValueError: {str(e)}")
-        return jsonify({'error': str(e)}), 400
-    except requests.RequestException as e:
-        logging.error(f"RequestException: {str(e)}")
-        return jsonify({'error': 'Temperature service error'}), 502  # Return 502 for service errors
+    except ValueError as ve:
+        logging.error(f"Validation error: {ve}")
+        return jsonify({'error': str(ve)}), 400
+    except requests.RequestException as re:
+        logging.error(f"Request error: {re}")
+        return jsonify({'error': f'{parameter.capitalize()} service error'}), 502
+    except TypeError as te:
+        logging.error(f"Type error: {te}")
+        return jsonify({'error': str(te)}), 400
     except Exception as e:
-        logging.error(f"Exception: {str(e)}")
+        logging.error(f"Unhandled error: {e}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/pressure', methods=['POST'])
-def get_pressure():
-    try:
-        data = request.get_json()
-        if not data or 'units' not in data or 'parameter' not in data:
-            return jsonify({'error': 'Missing required parameter: units or parameter'}), 400
-        
-        parameter = data['parameter'].lower()
-        units = data['units'].lower()
-        validate_units(parameter, units)
-        
-        config = THIRD_PARTY_APIS['pressure']
-        city_name = data.get('city', 'Hyderabad')
-        response = requests.get(
-            config['url'],
-            params={'key': config['api_key'], 'q': city_name}
-        )
-        response.raise_for_status()
-        
-        original_value = response.json()['current']['pressure_mb']
-        converted_value = convert_units(original_value, config['default_unit'], units, 'pressure')
-        
-        return jsonify({
-            'parameter': 'pressure',
-            'measured_value': converted_value,
-            'units': units,
-            'original_value': original_value,
-            'original_units': config['default_unit']
-        })
-        
-    except ValueError as e:
-        logging.error(f"ValueError: {str(e)}")
-        return jsonify({'error': str(e)}), 400
-    except requests.RequestException as e:
-        logging.error(f"RequestException: {str(e)}")
-        return jsonify({'error': 'Pressure service error'}), 502  # Return 502 for service errors
-    except Exception as e:
-        logging.error(f"Exception: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@app.route('/pollutant', methods=['POST'])
-def get_pollutant():
-    try:
-        data = request.get_json()
-        if not data or 'units' not in data:
-            return jsonify({'error': 'Missing required parameter: units'}), 400
-            
-        units = data['units'].lower()
-        
-        try:
-            validate_units('pollutant', units)
-        except ValueError as e:
-            logging.error(f"ValueError: {str(e)}")
-            return jsonify({'error': str(e)}), 400  # Explicitly return 400 for invalid units
-            
-        config = THIRD_PARTY_APIS['pollutant']
-        city_name = data.get('city', 'Hyderabad')
-        
-        try:
-            response = requests.get(
-                config['url'],
-                params={
-                    'key': config['api_key'],
-                    'q': city_name,
-                    'aqi': 'yes'
-                }
-            )
-            response.raise_for_status()
-        except requests.RequestException as e:
-            logging.error(f"RequestException: {str(e)}")
-            return jsonify({'error': 'Pollutant service error'}), 502  # Explicitly return 502 for service errors
-            
-        api_data = response.json()
-        
-        if 'air_quality' not in api_data['current'] or 'pm2_5' not in api_data['current']['air_quality']:
-            return jsonify({'error': 'Air quality data not available'}), 404
-            
-        original_value = api_data['current']['air_quality']['pm2_5']
-        converted_value = convert_units(original_value, 'µg/m³', units, 'pollutant')
-        
-        return jsonify({
-            'parameter': 'pollutant',
-            'measured_value': converted_value,
-            'units': units,
-            'original_value': original_value,
-            'original_units': 'µg/m³',
-            'city': city_name
-        })
-        
-    except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return jsonify({'error': 'Internal server error'}), 500
+@app.route('/<parameter>', methods=['POST'])
+def get_data(parameter):
+    if parameter not in PARAMS_CONFIG:
+        return jsonify({'error': 'Invalid parameter'}), 400
+    return handle_request(parameter)
 
 if __name__ == '__main__':
     app.run(debug=True)

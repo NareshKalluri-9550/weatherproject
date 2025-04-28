@@ -33,9 +33,30 @@ WEATHER API PROJECT SETUP
    pytest test_weather_api.py
 
 ## API Endpoints
-curl -X POST http://localhost:5000/temperature -H "Content-Type: application/json" -d "{\"parameter\":\"temperature\",\"units\":\"fahrenheit\"}"
+# Celsius with city
+curl -X POST http://localhost:5000/temperature -H "Content-Type: application/json" -d "{\"city\": \"London\", \"units\": \"celsius\"}"
 
-curl -X POST http://localhost:5000/pressure -H "Content-Type: application/json" -d "{\"parameter\":\"pressure\",\"units\":\"hpa\"}"
+# Fahrenheit without city
+curl -X POST http://localhost:5000/temperature -H "Content-Type: application/json" -d "{\"units\": \"fahrenheit\"}"
 
-curl -X POST http://localhost:5000/pollutant -H "Content-Type: application/json" -d "{\"parameter\":\"pollutant\",\"units\":\"ppm\"}"
+# Invalid units
+curl -X POST http://localhost:5000/temperature -H "Content-Type: application/json" -d "{\"units\": \"kelvin\"}"
+
+# hPa with city
+curl -X POST http://localhost:5000/pressure -H "Content-Type: application/json" -d "{\"city\": \"Tokyo\", \"units\": \"hpa\"}"
+
+# atm without city
+curl -X POST http://localhost:5000/pressure -H "Content-Type: application/json" -d "{\"units\": \"atm\"}"
+
+# mmHg with city
+curl -X POST http://localhost:5000/pressure -H "Content-Type: application/json" -d "{\"city\": \"Paris\", \"units\": \"mmhg\"}"
+
+# µg/m³ with city
+curl -X POST http://localhost:5000/pollutant -H "Content-Type: application/json" -d "{\"city\": \"Delhi\", \"units\": \"µg/m³\"}"
+
+# ppm without city
+curl -X POST http://localhost:5000/pollutant -H "Content-Type: application/json" -d "{\"units\": \"ppm\"}"
+
+# ppb with city
+curl -X POST http://localhost:5000/pollutant -H "Content-Type: application/json" -d "{\"city\": \"Beijing\", \"units\": \"ppb\"}"
 
